@@ -10,6 +10,8 @@ struct cpu cpus[NCPU];
 
 struct proc proc[NPROC];
 
+struct channel channels[NCHANNELS];
+
 struct proc *initproc;
 
 int nextpid = 1;
@@ -55,6 +57,19 @@ procinit(void)
       initlock(&p->lock, "proc");
       p->state = UNUSED;
       p->kstack = KSTACK((int) (p - proc));
+  }
+}
+
+// intialize the channel table
+void
+channelinit(void)
+{
+  struct channel *c;
+  
+  for(c = channels; c < &channels[NCHANNELS]; c++) {
+    initlock(&c->lock, "channel");
+    c->pid = -1;
+    c->value = 0;
   }
 }
 
