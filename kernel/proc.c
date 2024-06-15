@@ -68,6 +68,7 @@ channelinit(void)
   
   for(c = channels; c < &channels[NCHANNELS]; c++) {
     initlock(&c->lock, "channel");
+    c->is_empty = 1;
     c->pid = -1;
     c->value = 0;
   }
@@ -355,6 +356,23 @@ reparent(struct proc *p)
   }
 }
 
+
+// enter with the lock of the process held
+void
+close_all_channels(struct proc *p) {
+  for(int i = 0; i < NCHANNELS; i++) {
+    struct channel *c = &channels[i];
+    acquire(&c->lock);
+    if(c->pid == p->pid) {
+      release(&c->lock);
+      channel_destroy(i);
+    }
+    else {
+      release(&c->lock);
+    }
+  }
+}
+
 // Exit the current process.  Does not return.
 // An exited process remains in the zombie state
 // until its parent calls wait().
@@ -392,6 +410,8 @@ exit(int status)
 
   p->xstate = status;
   p->state = ZOMBIE;
+  // close channel
+  close_all_channels(p);
 
   release(&wait_lock);
 
@@ -610,6 +630,8 @@ kill(int pid)
         // Wake process from sleep().
         p->state = RUNNABLE;
       }
+      // close channels
+      close_all_channels(p);
       release(&p->lock);
       return 0;
     }
@@ -696,3 +718,103 @@ procdump(void)
     printf("\n");
   }
 }
+
+// channel system calls
+int
+channel_create(void)
+{
+  struct channel *c;
+  int i;
+  struct proc *p = myproc();
+
+  for(i = 0; i < NCHANNELS; i++) {
+    c = &channels[i];
+    acquire(&c->lock);
+    if(c->pid == -1) {
+      c->pid = p->pid;
+      c->value = 0;
+      c->is_empty = 1;
+      release(&c->lock);
+      return i;
+    }
+    release(&c->lock);
+  }
+  return -1;
+}
+
+int
+channel_put(int ch, int value)
+{
+  struct channel *c;
+
+  if(ch < 0 || ch >= NCHANNELS)
+    return -1;
+
+  c = &channels[ch];
+  acquire(&c->lock);
+
+  while (c->pid != -1 && !c->is_empty) {
+    sleep(c->put, &c->lock);
+  }
+  if(c->pid == -1) {
+    release(&c->lock);
+    return -1;
+  }
+  c->value = value;
+  c->is_empty = 0;
+  release(&c->lock);
+  wakeup(c->take);
+  return 0;
+}
+
+int
+channel_take(int ch, uint64 addr)
+{
+  struct channel *c;
+
+  if(ch < 0 || ch >= NCHANNELS)
+    return -1;
+
+  c = &channels[ch];
+  acquire(&c->lock);
+
+  while (c->pid != -1 && c->is_empty) {
+    sleep(c->take, &c->lock);
+  }
+  if(c->pid == -1) {
+    release(&c->lock);
+    return -1;
+  }
+  if (addr != 0 && copyout(myproc()->pagetable, addr, (char *)&c->value, sizeof(c->value)) < 0) {
+    release(&c->lock);
+    return -1;
+  }
+  c->is_empty = 1;
+  release(&c->lock);
+  wakeup(c->put);
+  return 0;
+}
+
+int
+channel_destroy(int ch)
+{
+  struct channel *c;
+
+  if(ch < 0 || ch >= NCHANNELS)
+    return -1;
+
+  c = &channels[ch];
+  acquire(&c->lock);
+  if(c->pid == -1) {
+    release(&c->lock);
+    return -1;
+  }
+  c->pid = -1;
+  c->value = 0;
+  release(&c->lock);
+  wakeup(c->put);
+  wakeup(c->take);
+  return 0;
+}
+
+

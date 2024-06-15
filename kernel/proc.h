@@ -108,7 +108,10 @@ struct proc {
 
 // channel struct
 struct channel {
-  struct spinlock lock; // lock for channel
+  struct spinlock lock;
+  void *put; // sleep on put when channel is full
+  void *take; // sleep on take when channel is empty
+  char is_empty; // check if the channel is empty
   int pid; // creator of the channel
   int value; // value of the channel
 };
