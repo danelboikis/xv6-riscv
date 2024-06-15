@@ -10,7 +10,24 @@ uint64
 sys_exit(void)
 {
   int n;
+  char exit_msg[32];
+  char *default_exit_msg = "No exit message";
+  uint64 exit_msg_addr;
+  
   argint(0, &n);
+
+  argaddr(1, &exit_msg_addr);
+  if (exit_msg_addr == 0) {
+    safestrcpy(myproc()->exit_msg, default_exit_msg, 16);
+  }
+  else if (argstr(1, exit_msg, sizeof(exit_msg)) < 0 || exit_msg[0] == 0) {
+    safestrcpy(myproc()->exit_msg, default_exit_msg, 16);
+  }
+  else {
+    // put the exit message in the pcb
+    safestrcpy(myproc()->exit_msg, exit_msg, 32);
+  }
+
   exit(n);
   return 0;  // not reached
 }
@@ -31,8 +48,10 @@ uint64
 sys_wait(void)
 {
   uint64 p;
+  uint64 exit_msg;
   argaddr(0, &p);
-  return wait(p);
+  argaddr(1, &exit_msg);
+  return wait(p, exit_msg);
 }
 
 uint64
@@ -88,4 +107,22 @@ sys_uptime(void)
   xticks = ticks;
   release(&tickslock);
   return xticks;
+}
+
+uint64
+sys_memsize(void)
+{
+  return myproc()->sz;
+}
+
+uint64
+sys_set_affinity_mask(void)
+{
+  int mask;
+  argint(0, &mask);
+  acquire(&myproc()->lock);
+  myproc()->affinity_mask = mask;
+  myproc()->effective_affinity_mask = mask;
+  release(&myproc()->lock);
+  return mask;
 }

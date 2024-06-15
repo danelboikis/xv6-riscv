@@ -55,6 +55,8 @@ procinit(void)
       initlock(&p->lock, "proc");
       p->state = UNUSED;
       p->kstack = KSTACK((int) (p - proc));
+      p->affinity_mask = 0;
+      p->effective_affinity_mask = 0;
   }
 }
 
@@ -145,6 +147,8 @@ found:
   memset(&p->context, 0, sizeof(p->context));
   p->context.ra = (uint64)forkret;
   p->context.sp = p->kstack + PGSIZE;
+  p->affinity_mask = 0;
+  p->effective_affinity_mask = 0;
 
   return p;
 }
@@ -168,6 +172,8 @@ freeproc(struct proc *p)
   p->chan = 0;
   p->killed = 0;
   p->xstate = 0;
+  p->affinity_mask = 0;
+  p->effective_affinity_mask = 0;
   p->state = UNUSED;
 }
 
@@ -310,6 +316,9 @@ fork(void)
 
   safestrcpy(np->name, p->name, sizeof(p->name));
 
+  np->affinity_mask = p->affinity_mask;
+  np->effective_affinity_mask = p->affinity_mask;
+
   pid = np->pid;
 
   release(&np->lock);
@@ -388,7 +397,7 @@ exit(int status)
 // Wait for a child process to exit and return its pid.
 // Return -1 if this process has no children.
 int
-wait(uint64 addr)
+wait(uint64 addr, uint64 exit_msg)
 {
   struct proc *pp;
   int havekids, pid;
@@ -410,6 +419,11 @@ wait(uint64 addr)
           pid = pp->pid;
           if(addr != 0 && copyout(p->pagetable, addr, (char *)&pp->xstate,
                                   sizeof(pp->xstate)) < 0) {
+            release(&pp->lock);
+            release(&wait_lock);
+            return -1;
+          }
+          if(exit_msg != 0 && copyout(p->pagetable, exit_msg, pp->exit_msg, strlen(pp->exit_msg)) < 0) {
             release(&pp->lock);
             release(&wait_lock);
             return -1;
@@ -446,6 +460,8 @@ scheduler(void)
 {
   struct proc *p;
   struct cpu *c = mycpu();
+  int cid = cpuid();
+  int bitmask;
   
   c->proc = 0;
   for(;;){
@@ -454,10 +470,17 @@ scheduler(void)
 
     for(p = proc; p < &proc[NPROC]; p++) {
       acquire(&p->lock);
-      if(p->state == RUNNABLE) {
+      cid = cpuid();
+      if(p->state == RUNNABLE && (p->affinity_mask == 0 || (p->effective_affinity_mask & (1 << cid)))) {
+        if (p->affinity_mask != 0) {
+          bitmask = 1 << cid;
+          bitmask = ~bitmask; // Invert the bits
+          p->effective_affinity_mask &= bitmask;
+        }
         // Switch to chosen process.  It is the process's job
         // to release its lock and then reacquire it
         // before jumping back to us.
+        printf("Scheduler started running process %d, on CPU %d\n", p->pid, cid);
         p->state = RUNNING;
         c->proc = p;
         swtch(&c->context, &p->context);
@@ -492,6 +515,11 @@ sched(void)
     panic("sched running");
   if(intr_get())
     panic("sched interruptible");
+  
+  // p->lock is held
+  if (p->effective_affinity_mask == 0) {
+    p->effective_affinity_mask = p->affinity_mask;
+  }
 
   intena = mycpu()->intena;
   swtch(&p->context, &mycpu()->context);
