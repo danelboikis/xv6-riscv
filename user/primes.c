@@ -43,7 +43,7 @@ main(int argc, char *argv[])
                     printf("Checker %d shutting down\n", getpid());
                     break;
                 }
-                if (check_primality(data)) {
+                if (check_primality(data)) { 
                     if (channel_put(cd2, data) < 0) {
                         printf("Checker %d shutting down\n", getpid());
                         channel_destroy(cd1);
@@ -64,6 +64,7 @@ main(int argc, char *argv[])
         }
         printf("Printer %d shutting down\n", getpid());
         channel_destroy(cd2);
+        printf("channel2 destroyed\n");
         exit(0);
     }
 

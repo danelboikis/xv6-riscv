@@ -114,4 +114,5 @@ struct channel {
   char is_empty; // check if the channel is empty
   int pid; // creator of the channel
   int value; // value of the channel
+  int refered; // check if the channel is refered
 };

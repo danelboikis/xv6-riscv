@@ -71,6 +71,7 @@ channelinit(void)
     c->is_empty = 1;
     c->pid = -1;
     c->value = 0;
+    c->refered = 0;
   }
 }
 
@@ -730,7 +731,7 @@ channel_create(void)
   for(i = 0; i < NCHANNELS; i++) {
     c = &channels[i];
     acquire(&c->lock);
-    if(c->pid == -1) {
+    if(c->pid == -1 && c->refered == 0) {
       c->pid = p->pid;
       c->value = 0;
       c->is_empty = 1;
@@ -752,10 +753,12 @@ channel_put(int ch, int value)
 
   c = &channels[ch];
   acquire(&c->lock);
+  c->refered++;
 
   while (c->pid != -1 && !c->is_empty) {
     sleep(c->put, &c->lock);
   }
+  c->refered--;
   if(c->pid == -1) {
     release(&c->lock);
     return -1;
@@ -777,10 +780,12 @@ channel_take(int ch, uint64 addr)
 
   c = &channels[ch];
   acquire(&c->lock);
+  c->refered++;
 
   while (c->pid != -1 && c->is_empty) {
     sleep(c->take, &c->lock);
   }
+  c->refered--;
   if(c->pid == -1) {
     release(&c->lock);
     return -1;
